@@ -8,7 +8,6 @@ import { connectDB } from "./lib/db.js";
 import chatRoutes from "./routes/chatRoutes.js";
 import sessionRoutes from "./routes/sessionRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
-import problemRoutes from "./routes/problemRoutes.js";
 
 const app = express();
 
@@ -21,7 +20,6 @@ app.use(cors({ origin: ENV.CLIENT_URL, credentials: true }));
 app.use("/api/auth", authRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/sessions", sessionRoutes);
-app.use("/api/problems", problemRoutes);
 
 app.get("/health", (req, res) => {
     res.status(200).json({ msg: "api is up and running" });
