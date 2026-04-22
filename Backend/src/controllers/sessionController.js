@@ -1,9 +1,9 @@
-import Session from "../models/Session.js";
+import { supabase } from "../lib/db.js";
 
 export async function createSession(req, res) {
   try {
     const { problem, difficulty } = req.body;
-    const userId = req.user._id;
+    const userId = req.user.id;
 
     if (!problem || !difficulty) {
       return res.status(400).json({ message: "Problem and difficulty are required" });
@@ -11,9 +11,13 @@ export async function createSession(req, res) {
 
     const callId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`;
 
-    const session = await Session.create({ problem, difficulty, host: userId, callId });
+    const { data: session, error } = await supabase
+      .from("sessions")
+      .insert({ problem, difficulty, host_id: userId, call_id: callId })
+      .select(`*, host:users!sessions_host_id_fkey(id, name, email, profile_image, supabase_id)`)
+      .single();
 
-    // TODO: create Stream video call and chat channel when Stream is configured
+    if (error) throw error;
 
     res.status(201).json({ session });
   } catch (error) {
@@ -24,11 +28,14 @@ export async function createSession(req, res) {
 
 export async function getActiveSessions(_, res) {
   try {
-    const sessions = await Session.find({ status: "active" })
-      .populate("host", "name profileImage email supabaseId")
-      .populate("participant", "name profileImage email supabaseId")
-      .sort({ createdAt: -1 })
+    const { data: sessions, error } = await supabase
+      .from("sessions")
+      .select(`*, host:users!sessions_host_id_fkey(id, name, email, profile_image, supabase_id), participant:users!sessions_participant_id_fkey(id, name, email, profile_image, supabase_id)`)
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
       .limit(20);
+
+    if (error) throw error;
 
     res.status(200).json({ sessions });
   } catch (error) {
@@ -39,14 +46,17 @@ export async function getActiveSessions(_, res) {
 
 export async function getMyRecentSessions(req, res) {
   try {
-    const userId = req.user._id;
+    const userId = req.user.id;
 
-    const sessions = await Session.find({
-      status: "completed",
-      $or: [{ host: userId }, { participant: userId }],
-    })
-      .sort({ createdAt: -1 })
+    const { data: sessions, error } = await supabase
+      .from("sessions")
+      .select(`*, host:users!sessions_host_id_fkey(id, name, email, profile_image, supabase_id), participant:users!sessions_participant_id_fkey(id, name, email, profile_image, supabase_id)`)
+      .eq("status", "completed")
+      .or(`host_id.eq.${userId},participant_id.eq.${userId}`)
+      .order("created_at", { ascending: false })
       .limit(20);
+
+    if (error) throw error;
 
     res.status(200).json({ sessions });
   } catch (error) {
@@ -59,11 +69,13 @@ export async function getSessionById(req, res) {
   try {
     const { id } = req.params;
 
-    const session = await Session.findById(id)
-      .populate("host", "name email profileImage supabaseId")
-      .populate("participant", "name email profileImage supabaseId");
+    const { data: session, error } = await supabase
+      .from("sessions")
+      .select(`*, host:users!sessions_host_id_fkey(id, name, email, profile_image, supabase_id), participant:users!sessions_participant_id_fkey(id, name, email, profile_image, supabase_id)`)
+      .eq("id", id)
+      .single();
 
-    if (!session) return res.status(404).json({ message: "Session not found" });
+    if (error || !session) return res.status(404).json({ message: "Session not found" });
 
     res.status(200).json({ session });
   } catch (error) {
@@ -75,29 +87,38 @@ export async function getSessionById(req, res) {
 export async function joinSession(req, res) {
   try {
     const { id } = req.params;
-    const userId = req.user._id;
-    const supabaseId = req.user.supabaseId;
+    const userId = req.user.id;
 
-    const session = await Session.findById(id);
+    // Get session
+    const { data: session, error: fetchError } = await supabase
+      .from("sessions")
+      .select("*")
+      .eq("id", id)
+      .single();
 
-    if (!session) return res.status(404).json({ message: "Session not found" });
+    if (fetchError || !session) return res.status(404).json({ message: "Session not found" });
 
     if (session.status !== "active") {
       return res.status(400).json({ message: "Cannot join a completed session" });
     }
 
-    if (session.host.toString() === userId.toString()) {
+    if (session.host_id === userId) {
       return res.status(400).json({ message: "Host cannot join their own session as participant" });
     }
 
-    if (session.participant) return res.status(409).json({ message: "Session is full" });
+    if (session.participant_id) return res.status(409).json({ message: "Session is full" });
 
-    session.participant = userId;
-    await session.save();
+    // Update session with participant
+    const { data: updatedSession, error: updateError } = await supabase
+      .from("sessions")
+      .update({ participant_id: userId })
+      .eq("id", id)
+      .select(`*, host:users!sessions_host_id_fkey(id, name, email, profile_image, supabase_id), participant:users!sessions_participant_id_fkey(id, name, email, profile_image, supabase_id)`)
+      .single();
 
-    // TODO: add member to Stream chat channel when Stream is configured
+    if (updateError) throw updateError;
 
-    res.status(200).json({ session });
+    res.status(200).json({ session: updatedSession });
   } catch (error) {
     console.log("Error in joinSession controller:", error.message);
     res.status(500).json({ message: "Internal Server Error" });
@@ -107,13 +128,18 @@ export async function joinSession(req, res) {
 export async function endSession(req, res) {
   try {
     const { id } = req.params;
-    const userId = req.user._id;
+    const userId = req.user.id;
 
-    const session = await Session.findById(id);
+    // Get session
+    const { data: session, error: fetchError } = await supabase
+      .from("sessions")
+      .select("*")
+      .eq("id", id)
+      .single();
 
-    if (!session) return res.status(404).json({ message: "Session not found" });
+    if (fetchError || !session) return res.status(404).json({ message: "Session not found" });
 
-    if (session.host.toString() !== userId.toString()) {
+    if (session.host_id !== userId) {
       return res.status(403).json({ message: "Only the host can end the session" });
     }
 
@@ -121,12 +147,17 @@ export async function endSession(req, res) {
       return res.status(400).json({ message: "Session is already completed" });
     }
 
-    // TODO: delete Stream video call and chat channel when Stream is configured
+    // Update session status
+    const { data: updatedSession, error: updateError } = await supabase
+      .from("sessions")
+      .update({ status: "completed" })
+      .eq("id", id)
+      .select()
+      .single();
 
-    session.status = "completed";
-    await session.save();
+    if (updateError) throw updateError;
 
-    res.status(200).json({ session, message: "Session ended successfully" });
+    res.status(200).json({ session: updatedSession, message: "Session ended successfully" });
   } catch (error) {
     console.log("Error in endSession controller:", error.message);
     res.status(500).json({ message: "Internal Server Error" });

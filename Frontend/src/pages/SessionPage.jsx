@@ -4,9 +4,12 @@ import { PROBLEMS } from "../data/problems";
 import { executeCode } from "../lib/piston";
 import { getDifficultyBadgeClass } from "../lib/utils";
 import { useAuth } from "../hooks/useAuth";
+import { useSessionChat } from "../hooks/useSessionChat";
 import Navbar from "../components/Navbar";
 import CodeEditorPanel from "../components/CodeEditorPanel";
 import OutputPanel from "../components/OutputPanel";
+import VideoPanel from "../components/VideoPanel";
+import ChatPanel from "../components/ChatPanel";
 
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import {
@@ -17,13 +20,11 @@ import {
   BookOpen,
   Lightbulb,
   ShieldCheck,
-  Send,
-  Video,
-  VideoOff,
-  Mic,
-  MicOff,
   Monitor,
   MessageSquare,
+  Link2,
+  Copy,
+  Check,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import confetti from "canvas-confetti";
@@ -32,6 +33,8 @@ function SessionPage() {
   const navigate = useNavigate();
   const { id } = useParams();
   const { user } = useAuth();
+
+  const userName = user?.email?.split("@")[0] || "Guest";
 
   // Session state
   const [session, setSession] = useState(null);
@@ -47,51 +50,35 @@ function SessionPage() {
   const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef(null);
 
-  // Chat
-  const [messages, setMessages] = useState([]);
-  const [chatInput, setChatInput] = useState("");
-  const chatEndRef = useRef(null);
-
-  // Video placeholders
-  const [videoEnabled, setVideoEnabled] = useState(true);
-  const [micEnabled, setMicEnabled] = useState(true);
-
   // Right panel tab
   const [activeTab, setActiveTab] = useState("video");
+
+  // Invite link
+  const [copied, setCopied] = useState(false);
+
+  // Real-time chat via Supabase Realtime Broadcast
+  const { messages, sendMessage, addSystemMessage, isConnected: chatConnected } =
+    useSessionChat(id, userName);
 
   // Initialize session from URL param
   useEffect(() => {
     const allProblems = Object.values(PROBLEMS);
-    // Try to find problem by session id pattern, or pick a random one
     const problem = allProblems.find((p) => id?.includes(p.id)) || allProblems[0];
 
-    const mockSession = {
+    const sessionData = {
       _id: id,
       problem: problem.title,
       problemId: problem.id,
       difficulty: problem.difficulty.toLowerCase(),
       status: "active",
-      host: {
-        name: user?.email?.split("@")[0] || "You",
-        email: user?.email || "user@codest.dev",
-      },
+      host: { name: userName, email: user?.email || "guest@codest.dev" },
       participant: null,
       createdAt: new Date().toISOString(),
     };
 
-    setSession(mockSession);
+    setSession(sessionData);
     setCode(problem.starterCode.javascript);
     setLoading(false);
-
-    // Add a welcome message
-    setMessages([
-      {
-        id: "system-1",
-        sender: "system",
-        text: `Session started! Problem: ${problem.title} (${problem.difficulty})`,
-        time: new Date(),
-      },
-    ]);
   }, [id, user]);
 
   // Timer
@@ -102,15 +89,8 @@ function SessionPage() {
     return () => clearInterval(timerRef.current);
   }, []);
 
-  // Auto-scroll chat
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
   const formatTime = (seconds) => {
-    const m = Math.floor(seconds / 60)
-      .toString()
-      .padStart(2, "0");
+    const m = Math.floor(seconds / 60).toString().padStart(2, "0");
     const s = (seconds % 60).toString().padStart(2, "0");
     return `${m}:${s}`;
   };
@@ -124,16 +104,12 @@ function SessionPage() {
     setOutput(null);
   };
 
-  const normalizeOutput = (output) => {
-    return output
+  const normalizeOutput = (out) => {
+    return out
       .trim()
       .split("\n")
       .map((line) =>
-        line
-          .trim()
-          .replace(/\[\s+/g, "[")
-          .replace(/\s+\]/g, "]")
-          .replace(/\s*,\s*/g, ",")
+        line.trim().replace(/\[\s+/g, "[").replace(/\s+\]/g, "]").replace(/\s*,\s*/g, ",")
       )
       .filter((line) => line.length > 0)
       .join("\n");
@@ -156,39 +132,13 @@ function SessionPage() {
         confetti({ particleCount: 80, spread: 250, origin: { x: 0.2, y: 0.6 } });
         confetti({ particleCount: 80, spread: 250, origin: { x: 0.8, y: 0.6 } });
         toast.success("All tests passed! Great job!");
-
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `system-${Date.now()}`,
-            sender: "system",
-            text: `${session.host.name} solved the problem! All tests passed.`,
-            time: new Date(),
-          },
-        ]);
+        addSystemMessage(`${userName} solved the problem! All tests passed.`);
       } else {
         toast.error("Tests failed. Check your output!");
       }
     } else if (!result.success) {
       toast.error("Code execution failed!");
     }
-  };
-
-  const handleSendMessage = (e) => {
-    e.preventDefault();
-    if (!chatInput.trim()) return;
-
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `msg-${Date.now()}`,
-        sender: session?.host?.name || "You",
-        text: chatInput.trim(),
-        time: new Date(),
-        isOwn: true,
-      },
-    ]);
-    setChatInput("");
   };
 
   const handleEndSession = () => {
@@ -227,7 +177,19 @@ function SessionPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(window.location.href);
+              setCopied(true);
+              toast.success("Session link copied! Share it to invite someone.");
+              setTimeout(() => setCopied(false), 2000);
+            }}
+            className="btn btn-ghost btn-xs gap-1.5 text-primary"
+          >
+            {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+            {copied ? "Copied!" : "Invite"}
+          </button>
           <div className="flex items-center gap-1.5 font-mono text-base-content/70">
             <Clock className="size-3.5" />
             <span>{formatTime(elapsed)}</span>
@@ -258,7 +220,6 @@ function SessionPage() {
                   </div>
 
                   <div className="p-5 space-y-4">
-                    {/* Description */}
                     {problemData?.description && (
                       <div className="rounded-xl bg-base-100 border border-base-content/10 p-4">
                         <h3 className="flex items-center gap-2 font-bold mb-2">
@@ -276,7 +237,6 @@ function SessionPage() {
                       </div>
                     )}
 
-                    {/* Examples */}
                     {problemData?.examples && (
                       <div className="rounded-xl bg-base-100 border border-base-content/10 p-4">
                         <h3 className="flex items-center gap-2 font-bold mb-3">
@@ -305,7 +265,6 @@ function SessionPage() {
                       </div>
                     )}
 
-                    {/* Constraints */}
                     {problemData?.constraints && (
                       <div className="rounded-xl bg-base-100 border border-base-content/10 p-4">
                         <h3 className="flex items-center gap-2 font-bold mb-2">
@@ -328,7 +287,7 @@ function SessionPage() {
 
               <PanelResizeHandle className="h-1.5 bg-base-300 hover:bg-primary transition-colors cursor-row-resize" />
 
-              {/* Code editor */}
+              {/* Code editor + Output */}
               <Panel defaultSize={40} minSize={20}>
                 <PanelGroup direction="vertical">
                   <Panel defaultSize={70} minSize={30}>
@@ -389,147 +348,13 @@ function SessionPage() {
               {/* Tab content */}
               <div className="flex-1 overflow-hidden">
                 {activeTab === "video" ? (
-                  /* Video call panel */
-                  <div className="h-full flex flex-col">
-                    <div className="flex-1 p-4 grid grid-rows-2 gap-3">
-                      {/* Host video */}
-                      <div className="rounded-xl bg-base-300 border border-base-content/10 flex items-center justify-center relative overflow-hidden">
-                        <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-secondary/5" />
-                        <div className="text-center z-10">
-                          <div className="size-16 rounded-full bg-gradient-to-br from-primary to-secondary grid place-items-center mx-auto mb-3">
-                            <span className="text-2xl font-bold text-primary-content">
-                              {session?.host?.name?.[0]?.toUpperCase() || "Y"}
-                            </span>
-                          </div>
-                          <p className="font-semibold">{session?.host?.name || "You"}</p>
-                          <p className="text-xs text-base-content/50">Host</p>
-                        </div>
-                        {!videoEnabled && (
-                          <div className="absolute inset-0 bg-base-300 flex items-center justify-center">
-                            <VideoOff className="size-8 text-base-content/30" />
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Participant video */}
-                      <div className="rounded-xl bg-base-300 border border-base-content/10 flex items-center justify-center border-dashed">
-                        <div className="text-center">
-                          <div className="size-16 rounded-full bg-base-content/10 grid place-items-center mx-auto mb-3">
-                            <Users className="size-7 text-base-content/30" />
-                          </div>
-                          <p className="text-sm text-base-content/50">Waiting for participant...</p>
-                          <p className="text-xs text-base-content/40 mt-1">
-                            Share session link to invite
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Video controls */}
-                    <div className="flex items-center justify-center gap-3 py-3 px-4 bg-base-100 border-t border-base-content/10">
-                      <button
-                        onClick={() => setMicEnabled(!micEnabled)}
-                        className={`btn btn-circle btn-sm ${
-                          micEnabled ? "btn-ghost" : "btn-error"
-                        }`}
-                        title={micEnabled ? "Mute mic" : "Unmute mic"}
-                      >
-                        {micEnabled ? <Mic className="size-4" /> : <MicOff className="size-4" />}
-                      </button>
-                      <button
-                        onClick={() => setVideoEnabled(!videoEnabled)}
-                        className={`btn btn-circle btn-sm ${
-                          videoEnabled ? "btn-ghost" : "btn-error"
-                        }`}
-                        title={videoEnabled ? "Turn off camera" : "Turn on camera"}
-                      >
-                        {videoEnabled ? (
-                          <Video className="size-4" />
-                        ) : (
-                          <VideoOff className="size-4" />
-                        )}
-                      </button>
-                      <button
-                        onClick={() => setActiveTab("chat")}
-                        className="btn btn-circle btn-sm btn-ghost"
-                        title="Open chat"
-                      >
-                        <MessageSquare className="size-4" />
-                      </button>
-                    </div>
-                  </div>
+                  <VideoPanel sessionId={id} userName={userName} />
                 ) : (
-                  /* Chat panel */
-                  <div className="h-full flex flex-col">
-                    <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                      {messages.map((msg) => (
-                        <div
-                          key={msg.id}
-                          className={`${
-                            msg.sender === "system"
-                              ? "text-center"
-                              : msg.isOwn
-                              ? "flex justify-end"
-                              : "flex justify-start"
-                          }`}
-                        >
-                          {msg.sender === "system" ? (
-                            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-base-content/5 text-xs text-base-content/50">
-                              <div className="size-1.5 rounded-full bg-primary" />
-                              {msg.text}
-                            </div>
-                          ) : (
-                            <div
-                              className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
-                                msg.isOwn
-                                  ? "bg-primary text-primary-content rounded-br-sm"
-                                  : "bg-base-100 border border-base-content/10 rounded-bl-sm"
-                              }`}
-                            >
-                              {!msg.isOwn && (
-                                <p className="text-xs font-semibold mb-0.5 opacity-70">
-                                  {msg.sender}
-                                </p>
-                              )}
-                              <p className="text-sm">{msg.text}</p>
-                              <p
-                                className={`text-[10px] mt-1 ${
-                                  msg.isOwn ? "text-primary-content/50" : "text-base-content/40"
-                                }`}
-                              >
-                                {msg.time.toLocaleTimeString([], {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                      <div ref={chatEndRef} />
-                    </div>
-
-                    {/* Chat input */}
-                    <form
-                      onSubmit={handleSendMessage}
-                      className="flex items-center gap-2 p-3 bg-base-100 border-t border-base-content/10"
-                    >
-                      <input
-                        type="text"
-                        value={chatInput}
-                        onChange={(e) => setChatInput(e.target.value)}
-                        placeholder="Type a message..."
-                        className="input input-sm input-bordered flex-1"
-                      />
-                      <button
-                        type="submit"
-                        className="btn btn-primary btn-sm btn-circle"
-                        disabled={!chatInput.trim()}
-                      >
-                        <Send className="size-4" />
-                      </button>
-                    </form>
-                  </div>
+                  <ChatPanel
+                    messages={messages}
+                    onSendMessage={sendMessage}
+                    isConnected={chatConnected}
+                  />
                 )}
               </div>
             </div>

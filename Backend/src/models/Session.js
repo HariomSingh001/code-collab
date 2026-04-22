@@ -1,39 +1,8 @@
-import mongoose from "mongoose";
+// Session schema is now managed by Supabase PostgreSQL
+// See src/lib/schema.sql for the table definition
+//
+// Table: sessions
+// Columns: id (UUID), problem (TEXT), difficulty (TEXT), host_id (UUID FK),
+//          participant_id (UUID FK), status (TEXT), call_id (TEXT),
+//          created_at (TIMESTAMPTZ), updated_at (TIMESTAMPTZ)
 
-const sessionSchema = new mongoose.Schema(
-  {
-    problem: {
-      type: String,
-      required: true,
-    },
-    difficulty: {
-      type: String,
-      enum: ["easy", "medium", "hard"],
-      required: true,
-    },
-    host: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-    },
-    participant: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      default: null,
-    },
-    status: {
-      type: String,
-      enum: ["active", "completed"],
-      default: "active",
-    },
-    callId: {
-      type: String,
-      default: "",
-    },
-  },
-  { timestamps: true }
-);
-
-const Session = mongoose.model("Session", sessionSchema);
-
-export default Session;

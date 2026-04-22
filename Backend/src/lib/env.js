@@ -1,15 +1,16 @@
 import dotenv from "dotenv";
 
-dotenv.config({quiet : true});
+dotenv.config({ quiet: true });
+
 export const ENV = {
-    PORT: process.env.PORT,
-    DB_URL: process.env.DB_URL,
-    NODE_ENV: process.env.NODE_ENV,
-    CLIENT_URL: process.env.CLIENT_URL,
-    SUPABASE_URL: process.env.SUPABASE_URL,
-    SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY,
-    STREAM_API_KEY: process.env.STREAM_API_KEY,
-    STREAM_API_SECRET: process.env.STREAM_API_SECRET,
+  PORT: process.env.PORT || 3000,
+  NODE_ENV: process.env.NODE_ENV || "development",
+  CLIENT_URL: process.env.CLIENT_URL || "http://localhost:5173",
+  SUPABASE_URL: process.env.VITE_SUPABASE_URL,
+  SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY,
+  SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+  DAILY_API_KEY: process.env.DAILY_API_KEY,
+  DAILY_DOMAIN: process.env.DAILY_DOMAIN,
 };
 
 export default ENV;
